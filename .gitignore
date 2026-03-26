@@ -1,0 +1,24 @@
+# Compilation and Build artifacts
+build/
+bin/
+lib/
+*.o
+*.a
+*.so
+*.so.*
+
+# Tool specific
+verification_tool/build/
+
+# SDK archives
+*.zip
+*.deb
+
+# Logs
+*.log
+*.log.txt
+Log/
+
+# OS specific
+.DS_Store
+Thumbs.db
