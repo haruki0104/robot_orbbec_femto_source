@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.o
+
+# Local secrets
+github_pat_20260326
+github_pat_20260326_classical
+
+# Logs
+Log/
