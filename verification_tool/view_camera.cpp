@@ -3,6 +3,8 @@
 #include <string>
 #include <libobsensor/ObSensor.hpp>
 #include <opencv2/opencv.hpp>
+#include <unistd.h>
+#include <sys/select.h>
 
 int main() try {
     ob::Context ctx;
@@ -65,14 +67,32 @@ int main() try {
     cv::namedWindow(depthWin, cv::WINDOW_AUTOSIZE);
 
     while(true) {
-        auto frameSet = pipe.waitForFrameset(100);
-        if(!frameSet) {
-            if (cv::getWindowProperty(colorWin, cv::WND_PROP_VISIBLE) < 1 && 
-                cv::getWindowProperty(depthWin, cv::WND_PROP_VISIBLE) < 1) break;
-            continue;
+        // 1. Handle window events and keyboard input (window focus)
+        int key = cv::waitKey(1);
+        if(key == 'q' || key == 'Q' || key == 27) break;
+
+        // 2. Handle console input (non-blocking check for 'q' or 'ESC')
+        struct timeval tv = {0, 0};
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        if(select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
+            char c;
+            if(read(STDIN_FILENO, &c, 1) > 0) {
+                if(c == 'q' || c == 'Q' || c == 27) break;
+            }
         }
 
-        // 4. Handle Color Frame
+        // 3. Check if windows were closed via 'X' button
+        // Return < 1 if window is closed or not visible
+        if (cv::getWindowProperty(colorWin, cv::WND_PROP_VISIBLE) < 1 || 
+            cv::getWindowProperty(depthWin, cv::WND_PROP_VISIBLE) < 1) break;
+
+        // 4. Try to get frames
+        auto frameSet = pipe.waitForFrameset(100);
+        if(!frameSet) continue;
+
+        // 5. Handle Color Frame
         auto colorFrame = frameSet->colorFrame();
         if(colorFrame && colorFrame->dataSize() > 0) {
             cv::Mat colorMat;
@@ -89,7 +109,7 @@ int main() try {
             if(!colorMat.empty()) cv::imshow(colorWin, colorMat);
         }
 
-        // 5. Handle Depth Frame
+        // 6. Handle Depth Frame
         auto depthFrame = frameSet->depthFrame();
         if(depthFrame && depthFrame->dataSize() > 0) {
             cv::Mat depthMat(depthFrame->height(), depthFrame->width(), CV_16UC1, depthFrame->data());
@@ -98,11 +118,6 @@ int main() try {
             cv::applyColorMap(depthDisplay, depthDisplay, cv::COLORMAP_JET);
             cv::imshow(depthWin, depthDisplay);
         }
-
-        int key = cv::waitKey(1);
-        if(key == 'q' || key == 27) break;
-        if (cv::getWindowProperty(colorWin, cv::WND_PROP_VISIBLE) < 1 && 
-            cv::getWindowProperty(depthWin, cv::WND_PROP_VISIBLE) < 1) break;
     }
 
     pipe.stop();
