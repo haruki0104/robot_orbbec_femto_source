@@ -10,9 +10,9 @@ This project provides the Orbbec SDK v2 (`libobsensor`) and a dedicated verifica
 
 ### Main Technologies
 - **Language**: C++11
-- **Build System**: CMake (3.10+)
+- **Build System**: CMake (3.10+), colcon (for ROS 2)
 - **SDK**: Orbbec SDK v2 (`libobsensor`)
-- **Dependencies**: OpenCV (optional, used for `view_camera` and certain SDK examples), `libusb-1.0`, `build-essential`.
+- **Dependencies**: OpenCV (optional, used for `view_camera` and certain SDK examples), `libusb-1.0`, `build-essential`, ROS 2 Humble (optional).
 
 ---
 
@@ -76,3 +76,5 @@ make
 - `OrbbecSDK/lib`: Shared libraries for linking.
 - `verification_tool/verify_camera.cpp`: Implementation of the OK/NG logic.
 - `verification_tool/view_camera.cpp`: Simple OpenCV-based stream viewer.
+- `ros2_bridge/`: Sample ROS 2 node for publishing color, depth, and point cloud streams.
+- `ROS2_INTEGRATION.md`: Guide for using the ROS 2 bridge.

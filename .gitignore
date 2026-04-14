@@ -22,3 +22,12 @@ Log/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*~
