@@ -45,4 +45,5 @@ make
 
 - `OrbbecSDK/`: The Orbbec SDK v2 files.
 - `verification_tool/`: Source code for the OK/NG verification tool.
+- `webrtc_streamer/`: Real-time WebRTC streaming for WebVR/3D visualization.
 - `verify.sh`: Convenience script to run the tool.

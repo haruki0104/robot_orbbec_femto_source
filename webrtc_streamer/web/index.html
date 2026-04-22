@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Orbbec Femto Mega WebVR SBS</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; z-index: 100; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; }
+        textarea { width: 300px; height: 100px; display: block; margin: 5px 0; }
+        button { cursor: pointer; padding: 5px 10px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="ui">
+        <h3>Signaling (Manual)</h3>
+        <label>1. Paste SDP from C++ Tool here:</label>
+        <textarea id="remoteSdp" placeholder="Paste SDP here..."></textarea>
+        <button onclick="startConnection()">2. Connect & Generate Answer</button>
+        <label style="display:block; margin-top:10px;">3. Copy this Answer back to C++ Tool (if needed):</label>
+        <textarea id="localSdp" readonly></textarea>
+        <div id="status">Status: Waiting...</div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, video, videoTexture, mesh;
+        let pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        async function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 2;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const vrButton = document.createElement('button');
+            vrButton.id = 'vrButton';
+            vrButton.textContent = 'Checking VR Support...';
+            vrButton.style.position = 'absolute';
+            vrButton.style.bottom = '20px';
+            vrButton.style.left = '50%';
+            vrButton.style.transform = 'translateX(-50%)';
+            document.body.appendChild(vrButton);
+
+            if ('xr' in navigator) {
+                const isSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                if (isSupported) {
+                    vrButton.textContent = 'Enter VR';
+                    vrButton.onclick = () => {
+                        navigator.xr.requestSession('immersive-vr')
+                            .then(s => renderer.xr.setSession(s))
+                            .catch(err => {
+                                console.error("Failed to start VR session:", err);
+                                alert("VR Error: " + err.message);
+                            });
+                    };
+                } else {
+                    vrButton.textContent = 'VR Not Supported on this Device';
+                    console.warn("Immersive VR not supported.");
+                }
+            } else {
+                vrButton.textContent = 'WebXR Not Available (Use Localhost/HTTPS)';
+                console.error("navigator.xr is undefined. WebXR requires HTTPS or localhost.");
+            }
+
+            video = document.createElement('video');
+            video.autoplay = true;
+            video.playsinline = true;
+        }
+
+        pc.ontrack = (event) => {
+            console.log("Track received");
+            video.srcObject = event.streams[0];
+            video.onloadedmetadata = () => {
+                video.play();
+                setup3DView();
+                document.getElementById('status').textContent = 'Status: Connected!';
+                document.getElementById('ui').style.opacity = '0.3'; // Fade UI
+            };
+        };
+
+        async function startConnection() {
+            const remoteSdpText = document.getElementById('remoteSdp').value;
+            if (!remoteSdpText) return alert("Please paste the SDP from the streamer.");
+
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdpText }));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                document.getElementById('localSdp').value = pc.localDescription.sdp;
+                document.getElementById('status').textContent = 'Status: Answer generated. Waiting for ICE...';
+            } catch (e) {
+                console.error(e);
+                alert("Error setting Remote SDP: " + e.message);
+            }
+        }
+
+        function setup3DView() {
+            if (mesh) return;
+            videoTexture = new THREE.VideoTexture(video);
+            const geometry = new THREE.PlaneGeometry(1.6, 1.2, 160, 120);
+            const material = new THREE.ShaderMaterial({
+                uniforms: { tVideo: { value: videoTexture } },
+                vertexShader: `
+                    uniform sampler2D tVideo;
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        vec2 depthUv = vec2(uv.x * 0.5 + 0.5, uv.y);
+                        float depth = texture2D(tVideo, depthUv).r;
+                        vec3 pos = position;
+                        pos.z = depth * 0.8; 
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D tVideo;
+                    varying vec2 vUv;
+                    void main() {
+                        vec2 colorUv = vec2(vUv.x * 0.5, vUv.y);
+                        gl_FragColor = texture2D(tVideo, colorUv);
+                    }
+                `,
+                side: THREE.DoubleSide
+            });
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(() => {
+                renderer.render(scene, camera);
+            });
+        }
+
+        initThree();
+        animate();
+    </script>
+</body>
+</html>
