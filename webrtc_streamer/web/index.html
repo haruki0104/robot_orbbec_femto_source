@@ -10,6 +10,7 @@
         button { cursor: pointer; padding: 5px 10px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
     <div id="ui">
@@ -23,7 +24,7 @@
     </div>
 
     <script>
-        let scene, camera, renderer, video, videoTexture, mesh;
+        let scene, camera, renderer, video, videoTexture, mesh, controls;
         let pc = new RTCPeerConnection({
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         });
@@ -31,12 +32,16 @@
         async function initThree() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.z = 2;
+            camera.position.set(0, 0, 1.5);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
+
+            // Add OrbitControls for non-VR navigation
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
 
             const vrButton = document.createElement('button');
             vrButton.id = 'vrButton';
@@ -80,8 +85,17 @@
                 video.play();
                 setup3DView();
                 document.getElementById('status').textContent = 'Status: Connected!';
-                document.getElementById('ui').style.opacity = '0.3'; // Fade UI
+                document.getElementById('ui').style.opacity = '0.3'; 
             };
+        };
+
+        pc.onicegatheringstatechange = () => {
+            console.log("ICE Gathering State:", pc.iceGatheringState);
+            if (pc.iceGatheringState === 'complete') {
+                document.getElementById('localSdp').value = pc.localDescription.sdp;
+                document.getElementById('status').textContent = 'Status: ICE Complete! Copy the Answer below to the terminal.';
+                document.getElementById('localSdp').style.borderColor = '#00ff00';
+            }
         };
 
         async function startConnection() {
@@ -92,8 +106,9 @@
                 await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdpText }));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
+                // Initial display, will be updated by onicegatheringstatechange
                 document.getElementById('localSdp').value = pc.localDescription.sdp;
-                document.getElementById('status').textContent = 'Status: Answer generated. Waiting for ICE...';
+                document.getElementById('status').textContent = 'Status: Gathering ICE candidates...';
             } catch (e) {
                 console.error(e);
                 alert("Error setting Remote SDP: " + e.message);
@@ -134,6 +149,7 @@
 
         function animate() {
             renderer.setAnimationLoop(() => {
+                if (controls) controls.update();
                 renderer.render(scene, camera);
             });
         }
