@@ -1,0 +1,18 @@
+services:
+  webrtc-streamer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: orbbec-webrtc-dev:latest
+    container_name: orbbec_streamer_container
+    # Privileged mode and USB mounting are required for hardware camera access
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+    # Host networking is highly recommended for WebRTC to avoid ICE/STUN issues in containers
+    network_mode: host
+    stdin_open: true # Equivalent to -i
+    tty: true        # Equivalent to -t
+    working_dir: /workspace
+    # Default command starts a bash shell, but you can override this to start the streamer directly
+    command: /bin/bash

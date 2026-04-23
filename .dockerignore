@@ -1,0 +1,10 @@
+**/build/
+**/bin/
+**/Log/
+.git/
+.vscode/
+webrtc_streamer/build/
+verification_tool/build/
+OrbbecSDK/bin/
+*.ply
+*.bag
