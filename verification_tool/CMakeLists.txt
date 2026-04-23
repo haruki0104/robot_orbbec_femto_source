@@ -4,6 +4,7 @@ project(verify_camera)
 set(CMAKE_CXX_STANDARD 11)
 
 # Set OrbbecSDK path
+set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
 find_package(OrbbecSDK REQUIRED)
 
 find_package(OpenCV REQUIRED)
@@ -19,7 +20,7 @@ if(UNIX)
     set_target_properties(verify_camera view_camera PROPERTIES
         SKIP_BUILD_RPATH FALSE
         BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "$ORIGIN/../OrbbecSDK/lib"
+        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
         INSTALL_RPATH_USE_LINK_PATH TRUE
     )
 endif()

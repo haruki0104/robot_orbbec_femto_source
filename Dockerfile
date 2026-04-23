@@ -23,17 +23,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurable Orbbec SDK version
-ARG ORBBEC_SDK_VERSION=v2.1.10
+ARG ORBBEC_SDK_VERSION=v2.7.6
 
 # Build and install Orbbec SDK v2 from source
 RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
     cd /tmp/OrbbecSDK_v2 && \
     git checkout ${ORBBEC_SDK_VERSION} && \
     mkdir build && cd build && \
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
     make -j$(nproc) && \
     make install && \
-    ldconfig && \
     rm -rf /tmp/OrbbecSDK_v2
 
 # Install libdatachannel from source or PPA if available
