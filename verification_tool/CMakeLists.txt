@@ -4,7 +4,6 @@ project(verify_camera)
 set(CMAKE_CXX_STANDARD 11)
 
 # Set OrbbecSDK path
-set(OrbbecSDK_DIR ${CMAKE_CURRENT_LIST_DIR}/../OrbbecSDK/lib)
 find_package(OrbbecSDK REQUIRED)
 
 find_package(OpenCV REQUIRED)

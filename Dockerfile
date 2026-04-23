@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     git \
     wget \
     libusb-1.0-0-dev \
+    libssl-dev \
+    libudev-dev \
     libopencv-dev \
     libavcodec-dev \
     libavformat-dev \
@@ -19,6 +21,20 @@ RUN apt-get update && apt-get install -y \
     libswscale-dev \
     python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Configurable Orbbec SDK version
+ARG ORBBEC_SDK_VERSION=v2.1.10
+
+# Build and install Orbbec SDK v2 from source
+RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+    cd /tmp/OrbbecSDK_v2 && \
+    git checkout ${ORBBEC_SDK_VERSION} && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    rm -rf /tmp/OrbbecSDK_v2
 
 # Install libdatachannel from source or PPA if available
 # Since it's a specific dependency, we'll build it to ensure compatibility

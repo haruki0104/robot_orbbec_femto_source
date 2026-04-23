@@ -4,7 +4,6 @@ project(webrtc_streamer)
 set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
 
 # 1. Orbbec SDK
-set(OrbbecSDK_DIR ${CMAKE_CURRENT_LIST_DIR}/../OrbbecSDK/lib)
 find_package(OrbbecSDK REQUIRED)
 
 # 2. OpenCV
