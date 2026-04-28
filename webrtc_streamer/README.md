@@ -48,3 +48,16 @@ make
 - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
 - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
 - `web/index.html`: WebVR receiver client.
+
+## Docker Deployment
+
+### Accessing Binaries Outside Container
+To copy the pre-built binaries from the Docker image to your host machine's `bin/` folder, run:
+```bash
+docker compose run --rm webrtc-streamer cp -r /app/bin /workspace/bin/
+```
+The binaries (`webrtc_streamer`, `verify_camera`, etc.) will then be available in your local `./bin/` directory.
+
+## TODO
+
+- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.

@@ -8,7 +8,11 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
-#include "cv_bridge/cv_bridge.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "tf2_ros/static_transform_broadcaster.h"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2/LinearMath/Matrix3x3.h"
+#include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
 #include <libobsensor/ObSensor.hpp>
 
@@ -16,7 +20,7 @@ using namespace std::chrono_literals;
 
 class FemtoMegaNode : public rclcpp::Node {
 public:
-    FemtoMegaNode() : Node("femto_mega_node"), pipe_() {
+    FemtoMegaNode() : Node("femto_mega_node"), pipe_(nullptr) {
         // 0. Declare and get parameters
         this->declare_parameter<std::string>("camera_ip", "");
         std::string ip = this->get_parameter("camera_ip").as_string();
@@ -46,6 +50,7 @@ public:
 
         // 2. Configure Streams
         auto config = std::make_shared<ob::Config>();
+        
         auto colorProfiles = pipe_->getStreamProfileList(OB_SENSOR_COLOR);
         std::shared_ptr<ob::VideoStreamProfile> profile_color;
         if (colorProfiles) {
@@ -60,6 +65,14 @@ public:
             profile_depth = depthProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
             config->enableStream(profile_depth);
             RCLCPP_INFO(this->get_logger(), "Depth enabled: %dx%d", profile_depth->width(), profile_depth->height());
+        }
+
+        auto irProfiles = pipe_->getStreamProfileList(OB_SENSOR_IR);
+        std::shared_ptr<ob::VideoStreamProfile> profile_ir;
+        if (irProfiles) {
+            profile_ir = irProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
+            config->enableStream(profile_ir);
+            RCLCPP_INFO(this->get_logger(), "IR enabled: %dx%d", profile_ir->width(), profile_ir->height());
         }
 
         // 2.1 Enable IMU
@@ -81,26 +94,34 @@ public:
         pipe_->start(config);
 
         // 3. Setup ROS Publishers
+        tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
         color_pub_ = this->create_publisher<sensor_msgs::msg::Image>("camera/color/image_raw", 10);
         color_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera/color/camera_info", 10);
         depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>("camera/depth/image_raw", 10);
         depth_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera/depth/camera_info", 10);
+        ir_pub_ = this->create_publisher<sensor_msgs::msg::Image>("camera/ir/image_raw", 10);
+        ir_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera/ir/camera_info", 10);
         imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("camera/imu/data_raw", 10);
         pc_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("camera/depth/points", 10);
 
         // 3.1 Cache Camera Info
         try {
-            auto param = pipe_->getCameraParam();
             if (profile_color) {
-                color_info_ = convert_to_camera_info(param.rgbIntrinsic, param.rgbDistortion, profile_color->width(), profile_color->height());
+                color_info_ = convert_to_camera_info(profile_color->getIntrinsic(), profile_color->getDistortion(), profile_color->width(), profile_color->height());
             }
             if (profile_depth) {
-                depth_info_ = convert_to_camera_info(param.depthIntrinsic, param.depthDistortion, profile_depth->width(), profile_depth->height());
+                depth_info_ = convert_to_camera_info(profile_depth->getIntrinsic(), profile_depth->getDistortion(), profile_depth->width(), profile_depth->height());
                 // Initialize point cloud filter
                 point_cloud_filter_.setCreatePointFormat(OB_FORMAT_RGB_POINT);
             }
+            if (profile_ir) {
+                ir_info_ = convert_to_camera_info(profile_ir->getIntrinsic(), profile_ir->getDistortion(), profile_ir->width(), profile_ir->height());
+            }
+
+            // Publish Static Transforms
+            publish_static_transforms(profile_color, profile_depth, profile_ir);
         } catch (const ob::Error& e) {
-            RCLCPP_WARN(this->get_logger(), "Could not fetch calibration: %s", e.what());
+            RCLCPP_WARN(this->get_logger(), "Could not fetch calibration from profiles: %s", e.what());
         }
 
         // 4. Start processing loop
@@ -116,8 +137,8 @@ private:
         sensor_msgs::msg::CameraInfo info;
         info.width = width;
         info.height = height;
-        info.k = {intrinsic.fx, 0, intrinsic.cx, 0, intrinsic.fy, intrinsic.cy, 0, 0, 1};
-        info.p = {intrinsic.fx, 0, intrinsic.cx, 0, 0, intrinsic.fy, intrinsic.cy, 0, 0, 0, 1, 0};
+        info.k = {intrinsic.fx, 0, (double)intrinsic.cx, 0, intrinsic.fy, (double)intrinsic.cy, 0, 0, 1};
+        info.p = {intrinsic.fx, 0, (double)intrinsic.cx, 0, 0, intrinsic.fy, (double)intrinsic.cy, 0, 0, 0, 1, 0};
         
         // Distortion model mapping
         if (distortion.model == OB_DISTORTION_KANNALA_BRANDT4) {
@@ -131,36 +152,102 @@ private:
         return info;
     }
 
-    void process_frames() {
-        auto frameSet = pipe_->waitForFrameset(100);
+    void publish_static_transforms(std::shared_ptr<ob::VideoStreamProfile> color, 
+                                 std::shared_ptr<ob::VideoStreamProfile> depth,
+                                 std::shared_ptr<ob::VideoStreamProfile> ir) {
+        std::vector<geometry_msgs::msg::TransformStamped> transforms;
+        auto now = this->get_clock()->now();
 
-        // Handle IMU samples if any in the frameset
-        if (frameSet) {
-            auto accelFrame = frameSet->getFrame(OB_FRAME_ACCEL);
-            auto gyroFrame = frameSet->getFrame(OB_FRAME_GYRO);
-            if (accelFrame && gyroFrame) {
-                auto accel = accelFrame->as<ob::AccelFrame>();
-                auto gyro = gyroFrame->as<ob::GyroFrame>();
+        // 1. Base to Color (Identity for now)
+        geometry_msgs::msg::TransformStamped base_to_color;
+        base_to_color.header.stamp = now;
+        base_to_color.header.frame_id = "camera_link";
+        base_to_color.child_frame_id = "camera_color_frame";
+        base_to_color.transform.rotation.w = 1.0;
+        transforms.push_back(base_to_color);
 
-                sensor_msgs::msg::Imu imu_msg;
-                imu_msg.header.stamp = this->get_clock()->now();
-                imu_msg.header.frame_id = "camera_imu_frame";
-
-                imu_msg.linear_acceleration.x = accel->value().x;
-                imu_msg.linear_acceleration.y = accel->value().y;
-                imu_msg.linear_acceleration.z = accel->value().z;
-
-                imu_msg.angular_velocity.x = gyro->value().x;
-                imu_msg.angular_velocity.y = gyro->value().y;
-                imu_msg.angular_velocity.z = gyro->value().z;
-
-                imu_pub_->publish(imu_msg);
-            }
+        // 2. Color to Depth (Identity since D2C is enabled)
+        if (depth) {
+            geometry_msgs::msg::TransformStamped color_to_depth;
+            color_to_depth.header.stamp = now;
+            color_to_depth.header.frame_id = "camera_color_frame";
+            color_to_depth.child_frame_id = "camera_depth_frame";
+            color_to_depth.transform.rotation.w = 1.0;
+            transforms.push_back(color_to_depth);
         }
 
+        // 3. Color to IR
+        if (color && ir) {
+            try {
+                auto extrinsic = ir->getExtrinsicTo(color);
+                transforms.push_back(make_transform(now, "camera_color_frame", "camera_ir_frame", extrinsic));
+            } catch (...) {}
+        }
+
+        // 4. Color to IMU
+        try {
+            auto accelProfiles = pipe_->getStreamProfileList(OB_SENSOR_ACCEL);
+            if (color && accelProfiles && accelProfiles->getCount() > 0) {
+                auto extrinsic = accelProfiles->getProfile(0)->getExtrinsicTo(color);
+                transforms.push_back(make_transform(now, "camera_color_frame", "camera_imu_frame", extrinsic));
+            }
+        } catch (...) {}
+
+        tf_broadcaster_->sendTransform(transforms);
+    }
+
+    geometry_msgs::msg::TransformStamped make_transform(rclcpp::Time now, std::string parent, std::string child, OBExtrinsic extrinsic) {
+        geometry_msgs::msg::TransformStamped t;
+        t.header.stamp = now;
+        t.header.frame_id = parent;
+        t.child_frame_id = child;
+        
+        // Translation (Orbbec is in mm, ROS is in meters)
+        t.transform.translation.x = extrinsic.trans[0] / 1000.0;
+        t.transform.translation.y = extrinsic.trans[1] / 1000.0;
+        t.transform.translation.z = extrinsic.trans[2] / 1000.0;
+
+        // Rotation Matrix to Quaternion
+        tf2::Matrix3x3 m(extrinsic.rot[0], extrinsic.rot[1], extrinsic.rot[2],
+                         extrinsic.rot[3], extrinsic.rot[4], extrinsic.rot[5],
+                         extrinsic.rot[6], extrinsic.rot[7], extrinsic.rot[8]);
+        tf2::Quaternion q;
+        m.getRotation(q);
+        t.transform.rotation.x = q.x();
+        t.transform.rotation.y = q.y();
+        t.transform.rotation.z = q.z();
+        t.transform.rotation.w = q.w();
+        
+        return t;
+    }
+
+    void process_frames() {
+        auto frameSet = pipe_->waitForFrameset(100);
         if (!frameSet) return;
 
         auto now = this->get_clock()->now();
+
+        // Handle IMU samples if any in the frameset
+        auto accelFrame = frameSet->getFrame(OB_FRAME_ACCEL);
+        auto gyroFrame = frameSet->getFrame(OB_FRAME_GYRO);
+        if (accelFrame && gyroFrame) {
+            auto accel = accelFrame->as<ob::AccelFrame>();
+            auto gyro = gyroFrame->as<ob::GyroFrame>();
+
+            sensor_msgs::msg::Imu imu_msg;
+            imu_msg.header.stamp = now;
+            imu_msg.header.frame_id = "camera_imu_frame";
+
+            imu_msg.linear_acceleration.x = accel->value().x;
+            imu_msg.linear_acceleration.y = accel->value().y;
+            imu_msg.linear_acceleration.z = accel->value().z;
+
+            imu_msg.angular_velocity.x = gyro->value().x;
+            imu_msg.angular_velocity.y = gyro->value().y;
+            imu_msg.angular_velocity.z = gyro->value().z;
+
+            imu_pub_->publish(imu_msg);
+        }
 
         // Process Color
         auto colorFrame = frameSet->colorFrame();
@@ -189,7 +276,6 @@ private:
         auto depthFrame = frameSet->depthFrame();
         if (depthFrame && depthFrame->dataSize() > 0) {
             cv::Mat depthMat(depthFrame->height(), depthFrame->width(), CV_16UC1, depthFrame->data());
-            // ROS 16-bit depth is usually published in millimeters (mono16)
             auto msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono16", depthMat).toImageMsg();
             msg->header.stamp = now;
             msg->header.frame_id = "camera_color_frame"; // D2C Aligned
@@ -210,8 +296,6 @@ private:
                     pc_msg.is_dense = false;
                     pc_msg.is_bigendian = false;
 
-                    // XYZ + RGB (3*float32 + 3*float32 = 24 bytes per point)
-                    // Note: This matches ob::OBColorPoint structure
                     pc_msg.point_step = 24;
                     pc_msg.row_step = pc_msg.point_step * pc_msg.width;
 
@@ -229,18 +313,36 @@ private:
                 }
             }
         }
+
+        // Process IR
+        auto irFrame = frameSet->getFrame(OB_FRAME_IR);
+        if (irFrame && irFrame->dataSize() > 0) {
+            auto videoIrFrame = irFrame->as<ob::VideoFrame>();
+            cv::Mat irMat(videoIrFrame->height(), videoIrFrame->width(), CV_16UC1, videoIrFrame->data());
+            auto msg = cv_bridge::CvImage(std_msgs::msg::Header(), "mono16", irMat).toImageMsg();
+            msg->header.stamp = now;
+            msg->header.frame_id = "camera_ir_frame";
+            ir_pub_->publish(*msg);
+
+            ir_info_.header = msg->header;
+            ir_info_pub_->publish(ir_info_);
+        }
     }
 
     std::unique_ptr<ob::Pipeline> pipe_;
     ob::PointCloudFilter point_cloud_filter_;
+    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> tf_broadcaster_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr color_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr color_info_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr depth_info_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr ir_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr ir_info_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_pub_;
     sensor_msgs::msg::CameraInfo color_info_;
     sensor_msgs::msg::CameraInfo depth_info_;
+    sensor_msgs::msg::CameraInfo ir_info_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

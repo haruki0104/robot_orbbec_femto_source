@@ -20,7 +20,10 @@ if(UNIX)
     set_target_properties(verify_camera view_camera PROPERTIES
         SKIP_BUILD_RPATH FALSE
         BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
+        INSTALL_RPATH "/workspace/OrbbecSDK/lib"
         INSTALL_RPATH_USE_LINK_PATH TRUE
     )
 endif()
+
+# Install rules
+install(TARGETS verify_camera view_camera DESTINATION bin)

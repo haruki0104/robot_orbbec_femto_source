@@ -51,7 +51,10 @@ if(UNIX)
     set_target_properties(webrtc_streamer PROPERTIES
         SKIP_BUILD_RPATH FALSE
         BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
+        INSTALL_RPATH "/workspace/OrbbecSDK/lib:/usr/local/lib"
         INSTALL_RPATH_USE_LINK_PATH TRUE
     )
 endif()
+
+# Install rules
+install(TARGETS webrtc_streamer DESTINATION bin)

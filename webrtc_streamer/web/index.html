@@ -37,6 +37,7 @@
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
+            renderer.xr.setReferenceSpaceType('local');
             document.body.appendChild(renderer.domElement);
 
             // Add OrbitControls for non-VR navigation
@@ -57,12 +58,14 @@
                 if (isSupported) {
                     vrButton.textContent = 'Enter VR';
                     vrButton.onclick = () => {
-                        navigator.xr.requestSession('immersive-vr')
-                            .then(s => renderer.xr.setSession(s))
-                            .catch(err => {
-                                console.error("Failed to start VR session:", err);
-                                alert("VR Error: " + err.message);
-                            });
+                        navigator.xr.requestSession('immersive-vr', {
+                            optionalFeatures: ['local-floor', 'bounded-floor']
+                        })
+                        .then(s => renderer.xr.setSession(s))
+                        .catch(err => {
+                            console.error("Failed to start VR session:", err);
+                            alert("VR Error: " + err.message);
+                        });
                     };
                 } else {
                     vrButton.textContent = 'VR Not Supported on this Device';

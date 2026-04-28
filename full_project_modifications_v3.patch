@@ -1,0 +1,967 @@
+diff --git a/Dockerfile b/Dockerfile
+index 4783428..8ec823d 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -35,8 +35,7 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+     make install && \
+     rm -rf /tmp/OrbbecSDK_v2
+ 
+-# Install libdatachannel from source or PPA if available
+-# Since it's a specific dependency, we'll build it to ensure compatibility
++# Install libdatachannel from source
+ RUN apt-get update && apt-get install -y \
+     libssl-dev \
+     && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
+@@ -51,20 +50,23 @@ RUN apt-get update && apt-get install -y \
+ # Set the working directory
+ WORKDIR /workspace
+ 
+-# Copy the entire project into the container
++# Copy the entire project
+ COPY . .
+ 
+-# Build the WebRTC Streamer
+-RUN cd webrtc_streamer && \
+-    mkdir -p build && cd build && \
+-    cmake .. && \
+-    make -j$(nproc)
++# Build and Install WebRTC Streamer to /app
++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
++    make -j$(nproc) && make install && \
++    rm -rf /tmp/build_webrtc
+ 
+-# Build the Verification Tool
+-RUN cd verification_tool && \
+-    mkdir -p build && cd build && \
+-    cmake .. && \
+-    make -j$(nproc)
++# Build and Install Verification Tool to /app
++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
++    make -j$(nproc) && make install && \
++    rm -rf /tmp/build_verify
++
++# Add /app to PATH
++ENV PATH="/app/bin:${PATH}"
+ 
+ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
+ EXPOSE 8000
+diff --git a/docker-compose.yml b/docker-compose.yml
+index cf6d384..4ffa398 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -3,7 +3,7 @@ services:
+     build:
+       context: .
+       dockerfile: Dockerfile
+-    image: orbbec-webrtc-dev:latest
++    image: orbbec-webrtc-dev:v1.0.0
+     container_name: orbbec_streamer_container
+     # Privileged mode and USB mounting are required for hardware camera access
+     privileged: true
+diff --git a/full_project_modifications.patch b/full_project_modifications.patch
+new file mode 100644
+index 0000000..063cbf2
+--- /dev/null
++++ b/full_project_modifications.patch
+@@ -0,0 +1,245 @@
++diff --git a/Dockerfile b/Dockerfile
++index 4783428..16aedc7 100644
++--- a/Dockerfile
+++++ b/Dockerfile
++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
++     cd /tmp/OrbbecSDK_v2 && \
++     git checkout ${ORBBEC_SDK_VERSION} && \
++     mkdir build && cd build && \
++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
+++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
++     make -j$(nproc) && \
++     make install && \
++     rm -rf /tmp/OrbbecSDK_v2
++ 
++-# Install libdatachannel from source or PPA if available
++-# Since it's a specific dependency, we'll build it to ensure compatibility
++-RUN apt-get update && apt-get install -y \
++-    libssl-dev \
++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
++-    && cd /tmp/libdatachannel \
++-    && mkdir build && cd build \
++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
++-    && make -j$(nproc) \
++-    && make install \
++-    && ldconfig \
++-    && rm -rf /tmp/libdatachannel
+++# ... (libdatachannel build remains same) ...
++ 
++ # Set the working directory
++ WORKDIR /workspace
++ 
++-# Copy the entire project into the container
+++# Copy the entire project
++ COPY . .
++ 
++-# Build the WebRTC Streamer
++-RUN cd webrtc_streamer && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Build and Install WebRTC Streamer to /app
+++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
+++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_webrtc
+++
+++# Build and Install Verification Tool to /app
+++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
+++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_verify
++ 
++-# Build the Verification Tool
++-RUN cd verification_tool && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Add /app to PATH
+++ENV PATH="/app/bin:${PATH}"
++ 
++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
++ EXPOSE 8000
++diff --git a/project_modifications.patch b/project_modifications.patch
++new file mode 100644
++index 0000000..26996e7
++--- /dev/null
+++++ b/project_modifications.patch
++@@ -0,0 +1,118 @@
+++diff --git a/Dockerfile b/Dockerfile
+++index 4783428..16aedc7 100644
+++--- a/Dockerfile
++++++ b/Dockerfile
+++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+++     cd /tmp/OrbbecSDK_v2 && \
+++     git checkout ${ORBBEC_SDK_VERSION} && \
+++     mkdir build && cd build && \
+++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
++++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
+++     make -j$(nproc) && \
+++     make install && \
+++     rm -rf /tmp/OrbbecSDK_v2
+++ 
+++-# Install libdatachannel from source or PPA if available
+++-# Since it's a specific dependency, we'll build it to ensure compatibility
+++-RUN apt-get update && apt-get install -y \
+++-    libssl-dev \
+++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
+++-    && cd /tmp/libdatachannel \
+++-    && mkdir build && cd build \
+++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
+++-    && make -j$(nproc) \
+++-    && make install \
+++-    && ldconfig \
+++-    && rm -rf /tmp/libdatachannel
++++# ... (libdatachannel build remains same) ...
+++ 
+++ # Set the working directory
+++ WORKDIR /workspace
+++ 
+++-# Copy the entire project into the container
++++# Copy the entire project
+++ COPY . .
+++ 
+++-# Build the WebRTC Streamer
+++-RUN cd webrtc_streamer && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Build and Install WebRTC Streamer to /app
++++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
++++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_webrtc
++++
++++# Build and Install Verification Tool to /app
++++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
++++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_verify
+++ 
+++-# Build the Verification Tool
+++-RUN cd verification_tool && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Add /app to PATH
++++ENV PATH="/app/bin:${PATH}"
+++ 
+++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
+++ EXPOSE 8000
+++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
+++index 2d96aa1..04bf6ea 100644
+++--- a/verification_tool/CMakeLists.txt
++++++ b/verification_tool/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(verify_camera)
+++ set(CMAKE_CXX_STANDARD 11)
+++ 
+++ # Set OrbbecSDK path
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ find_package(OpenCV REQUIRED)
+++@@ -20,7 +20,7 @@ if(UNIX)
+++     set_target_properties(verify_camera view_camera PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
+++index 25500d0..ee626ec 100644
+++--- a/webrtc_streamer/CMakeLists.txt
++++++ b/webrtc_streamer/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(webrtc_streamer)
+++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
+++ 
+++ # 1. Orbbec SDK
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ # 2. OpenCV
+++@@ -51,7 +51,7 @@ if(UNIX)
+++     set_target_properties(webrtc_streamer PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
+++index 9de8219..b275cca 100644
+++--- a/webrtc_streamer/README.md
++++++ b/webrtc_streamer/README.md
+++@@ -48,3 +48,7 @@ make
+++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
+++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
+++ - `web/index.html`: WebVR receiver client.
++++
++++## TODO
++++
++++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
++index 2d96aa1..04bf6ea 100644
++--- a/verification_tool/CMakeLists.txt
+++++ b/verification_tool/CMakeLists.txt
++@@ -4,7 +4,7 @@ project(verify_camera)
++ set(CMAKE_CXX_STANDARD 11)
++ 
++ # Set OrbbecSDK path
++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++ find_package(OrbbecSDK REQUIRED)
++ 
++ find_package(OpenCV REQUIRED)
++@@ -20,7 +20,7 @@ if(UNIX)
++     set_target_properties(verify_camera view_camera PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
+++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
++index 25500d0..ee626ec 100644
++--- a/webrtc_streamer/CMakeLists.txt
+++++ b/webrtc_streamer/CMakeLists.txt
++@@ -4,7 +4,7 @@ project(webrtc_streamer)
++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
++ 
++ # 1. Orbbec SDK
++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++ find_package(OrbbecSDK REQUIRED)
++ 
++ # 2. OpenCV
++@@ -51,7 +51,7 @@ if(UNIX)
++     set_target_properties(webrtc_streamer PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
+++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
++index 9de8219..b275cca 100644
++--- a/webrtc_streamer/README.md
+++++ b/webrtc_streamer/README.md
++@@ -48,3 +48,7 @@ make
++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
++ - `web/index.html`: WebVR receiver client.
+++
+++## TODO
+++
+++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
++diff --git a/workspace/.gitkeep b/workspace/.gitkeep
++new file mode 100644
++index 0000000..e69de29
+diff --git a/full_project_modifications_v2.patch b/full_project_modifications_v2.patch
+new file mode 100644
+index 0000000..fd3911e
+--- /dev/null
++++ b/full_project_modifications_v2.patch
+@@ -0,0 +1,471 @@
++diff --git a/Dockerfile b/Dockerfile
++index 4783428..8ec823d 100644
++--- a/Dockerfile
+++++ b/Dockerfile
++@@ -35,8 +35,7 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
++     make install && \
++     rm -rf /tmp/OrbbecSDK_v2
++ 
++-# Install libdatachannel from source or PPA if available
++-# Since it's a specific dependency, we'll build it to ensure compatibility
+++# Install libdatachannel from source
++ RUN apt-get update && apt-get install -y \
++     libssl-dev \
++     && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
++@@ -51,20 +50,23 @@ RUN apt-get update && apt-get install -y \
++ # Set the working directory
++ WORKDIR /workspace
++ 
++-# Copy the entire project into the container
+++# Copy the entire project
++ COPY . .
++ 
++-# Build the WebRTC Streamer
++-RUN cd webrtc_streamer && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Build and Install WebRTC Streamer to /app
+++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
+++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_webrtc
++ 
++-# Build the Verification Tool
++-RUN cd verification_tool && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Build and Install Verification Tool to /app
+++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
+++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_verify
+++
+++# Add /app to PATH
+++ENV PATH="/app/bin:${PATH}"
++ 
++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
++ EXPOSE 8000
++diff --git a/full_project_modifications.patch b/full_project_modifications.patch
++new file mode 100644
++index 0000000..063cbf2
++--- /dev/null
+++++ b/full_project_modifications.patch
++@@ -0,0 +1,245 @@
+++diff --git a/Dockerfile b/Dockerfile
+++index 4783428..16aedc7 100644
+++--- a/Dockerfile
++++++ b/Dockerfile
+++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+++     cd /tmp/OrbbecSDK_v2 && \
+++     git checkout ${ORBBEC_SDK_VERSION} && \
+++     mkdir build && cd build && \
+++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
++++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
+++     make -j$(nproc) && \
+++     make install && \
+++     rm -rf /tmp/OrbbecSDK_v2
+++ 
+++-# Install libdatachannel from source or PPA if available
+++-# Since it's a specific dependency, we'll build it to ensure compatibility
+++-RUN apt-get update && apt-get install -y \
+++-    libssl-dev \
+++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
+++-    && cd /tmp/libdatachannel \
+++-    && mkdir build && cd build \
+++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
+++-    && make -j$(nproc) \
+++-    && make install \
+++-    && ldconfig \
+++-    && rm -rf /tmp/libdatachannel
++++# ... (libdatachannel build remains same) ...
+++ 
+++ # Set the working directory
+++ WORKDIR /workspace
+++ 
+++-# Copy the entire project into the container
++++# Copy the entire project
+++ COPY . .
+++ 
+++-# Build the WebRTC Streamer
+++-RUN cd webrtc_streamer && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Build and Install WebRTC Streamer to /app
++++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
++++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_webrtc
++++
++++# Build and Install Verification Tool to /app
++++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
++++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_verify
+++ 
+++-# Build the Verification Tool
+++-RUN cd verification_tool && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Add /app to PATH
++++ENV PATH="/app/bin:${PATH}"
+++ 
+++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
+++ EXPOSE 8000
+++diff --git a/project_modifications.patch b/project_modifications.patch
+++new file mode 100644
+++index 0000000..26996e7
+++--- /dev/null
++++++ b/project_modifications.patch
+++@@ -0,0 +1,118 @@
++++diff --git a/Dockerfile b/Dockerfile
++++index 4783428..16aedc7 100644
++++--- a/Dockerfile
+++++++ b/Dockerfile
++++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
++++     cd /tmp/OrbbecSDK_v2 && \
++++     git checkout ${ORBBEC_SDK_VERSION} && \
++++     mkdir build && cd build && \
++++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
+++++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
++++     make -j$(nproc) && \
++++     make install && \
++++     rm -rf /tmp/OrbbecSDK_v2
++++ 
++++-# Install libdatachannel from source or PPA if available
++++-# Since it's a specific dependency, we'll build it to ensure compatibility
++++-RUN apt-get update && apt-get install -y \
++++-    libssl-dev \
++++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
++++-    && cd /tmp/libdatachannel \
++++-    && mkdir build && cd build \
++++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
++++-    && make -j$(nproc) \
++++-    && make install \
++++-    && ldconfig \
++++-    && rm -rf /tmp/libdatachannel
+++++# ... (libdatachannel build remains same) ...
++++ 
++++ # Set the working directory
++++ WORKDIR /workspace
++++ 
++++-# Copy the entire project into the container
+++++# Copy the entire project
++++ COPY . .
++++ 
++++-# Build the WebRTC Streamer
++++-RUN cd webrtc_streamer && \
++++-    mkdir -p build && cd build && \
++++-    cmake .. && \
++++-    make -j$(nproc)
+++++# Build and Install WebRTC Streamer to /app
+++++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
+++++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
+++++    make -j$(nproc) && make install && \
+++++    rm -rf /tmp/build_webrtc
+++++
+++++# Build and Install Verification Tool to /app
+++++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
+++++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
+++++    make -j$(nproc) && make install && \
+++++    rm -rf /tmp/build_verify
++++ 
++++-# Build the Verification Tool
++++-RUN cd verification_tool && \
++++-    mkdir -p build && cd build && \
++++-    cmake .. && \
++++-    make -j$(nproc)
+++++# Add /app to PATH
+++++ENV PATH="/app/bin:${PATH}"
++++ 
++++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
++++ EXPOSE 8000
++++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
++++index 2d96aa1..04bf6ea 100644
++++--- a/verification_tool/CMakeLists.txt
+++++++ b/verification_tool/CMakeLists.txt
++++@@ -4,7 +4,7 @@ project(verify_camera)
++++ set(CMAKE_CXX_STANDARD 11)
++++ 
++++ # Set OrbbecSDK path
++++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++++ find_package(OrbbecSDK REQUIRED)
++++ 
++++ find_package(OpenCV REQUIRED)
++++@@ -20,7 +20,7 @@ if(UNIX)
++++     set_target_properties(verify_camera view_camera PROPERTIES
++++         SKIP_BUILD_RPATH FALSE
++++         BUILD_WITH_INSTALL_RPATH TRUE
++++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
+++++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
++++         INSTALL_RPATH_USE_LINK_PATH TRUE
++++     )
++++ endif()
++++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
++++index 25500d0..ee626ec 100644
++++--- a/webrtc_streamer/CMakeLists.txt
+++++++ b/webrtc_streamer/CMakeLists.txt
++++@@ -4,7 +4,7 @@ project(webrtc_streamer)
++++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
++++ 
++++ # 1. Orbbec SDK
++++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++++ find_package(OrbbecSDK REQUIRED)
++++ 
++++ # 2. OpenCV
++++@@ -51,7 +51,7 @@ if(UNIX)
++++     set_target_properties(webrtc_streamer PROPERTIES
++++         SKIP_BUILD_RPATH FALSE
++++         BUILD_WITH_INSTALL_RPATH TRUE
++++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
+++++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
++++         INSTALL_RPATH_USE_LINK_PATH TRUE
++++     )
++++ endif()
++++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
++++index 9de8219..b275cca 100644
++++--- a/webrtc_streamer/README.md
+++++++ b/webrtc_streamer/README.md
++++@@ -48,3 +48,7 @@ make
++++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
++++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
++++ - `web/index.html`: WebVR receiver client.
+++++
+++++## TODO
+++++
+++++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
+++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
+++index 2d96aa1..04bf6ea 100644
+++--- a/verification_tool/CMakeLists.txt
++++++ b/verification_tool/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(verify_camera)
+++ set(CMAKE_CXX_STANDARD 11)
+++ 
+++ # Set OrbbecSDK path
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ find_package(OpenCV REQUIRED)
+++@@ -20,7 +20,7 @@ if(UNIX)
+++     set_target_properties(verify_camera view_camera PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
+++index 25500d0..ee626ec 100644
+++--- a/webrtc_streamer/CMakeLists.txt
++++++ b/webrtc_streamer/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(webrtc_streamer)
+++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
+++ 
+++ # 1. Orbbec SDK
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ # 2. OpenCV
+++@@ -51,7 +51,7 @@ if(UNIX)
+++     set_target_properties(webrtc_streamer PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
+++index 9de8219..b275cca 100644
+++--- a/webrtc_streamer/README.md
++++++ b/webrtc_streamer/README.md
+++@@ -48,3 +48,7 @@ make
+++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
+++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
+++ - `web/index.html`: WebVR receiver client.
++++
++++## TODO
++++
++++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
+++diff --git a/workspace/.gitkeep b/workspace/.gitkeep
+++new file mode 100644
+++index 0000000..e69de29
++diff --git a/project_modifications.patch b/project_modifications.patch
++new file mode 100644
++index 0000000..26996e7
++--- /dev/null
+++++ b/project_modifications.patch
++@@ -0,0 +1,118 @@
+++diff --git a/Dockerfile b/Dockerfile
+++index 4783428..16aedc7 100644
+++--- a/Dockerfile
++++++ b/Dockerfile
+++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+++     cd /tmp/OrbbecSDK_v2 && \
+++     git checkout ${ORBBEC_SDK_VERSION} && \
+++     mkdir build && cd build && \
+++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
++++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
+++     make -j$(nproc) && \
+++     make install && \
+++     rm -rf /tmp/OrbbecSDK_v2
+++ 
+++-# Install libdatachannel from source or PPA if available
+++-# Since it's a specific dependency, we'll build it to ensure compatibility
+++-RUN apt-get update && apt-get install -y \
+++-    libssl-dev \
+++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
+++-    && cd /tmp/libdatachannel \
+++-    && mkdir build && cd build \
+++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
+++-    && make -j$(nproc) \
+++-    && make install \
+++-    && ldconfig \
+++-    && rm -rf /tmp/libdatachannel
++++# ... (libdatachannel build remains same) ...
+++ 
+++ # Set the working directory
+++ WORKDIR /workspace
+++ 
+++-# Copy the entire project into the container
++++# Copy the entire project
+++ COPY . .
+++ 
+++-# Build the WebRTC Streamer
+++-RUN cd webrtc_streamer && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Build and Install WebRTC Streamer to /app
++++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
++++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_webrtc
++++
++++# Build and Install Verification Tool to /app
++++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
++++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
++++    make -j$(nproc) && make install && \
++++    rm -rf /tmp/build_verify
+++ 
+++-# Build the Verification Tool
+++-RUN cd verification_tool && \
+++-    mkdir -p build && cd build && \
+++-    cmake .. && \
+++-    make -j$(nproc)
++++# Add /app to PATH
++++ENV PATH="/app/bin:${PATH}"
+++ 
+++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
+++ EXPOSE 8000
+++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
+++index 2d96aa1..04bf6ea 100644
+++--- a/verification_tool/CMakeLists.txt
++++++ b/verification_tool/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(verify_camera)
+++ set(CMAKE_CXX_STANDARD 11)
+++ 
+++ # Set OrbbecSDK path
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ find_package(OpenCV REQUIRED)
+++@@ -20,7 +20,7 @@ if(UNIX)
+++     set_target_properties(verify_camera view_camera PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
+++index 25500d0..ee626ec 100644
+++--- a/webrtc_streamer/CMakeLists.txt
++++++ b/webrtc_streamer/CMakeLists.txt
+++@@ -4,7 +4,7 @@ project(webrtc_streamer)
+++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
+++ 
+++ # 1. Orbbec SDK
+++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
++++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
+++ find_package(OrbbecSDK REQUIRED)
+++ 
+++ # 2. OpenCV
+++@@ -51,7 +51,7 @@ if(UNIX)
+++     set_target_properties(webrtc_streamer PROPERTIES
+++         SKIP_BUILD_RPATH FALSE
+++         BUILD_WITH_INSTALL_RPATH TRUE
+++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
++++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
+++         INSTALL_RPATH_USE_LINK_PATH TRUE
+++     )
+++ endif()
+++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
+++index 9de8219..b275cca 100644
+++--- a/webrtc_streamer/README.md
++++++ b/webrtc_streamer/README.md
+++@@ -48,3 +48,7 @@ make
+++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
+++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
+++ - `web/index.html`: WebVR receiver client.
++++
++++## TODO
++++
++++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
++index 2d96aa1..49f762a 100644
++--- a/verification_tool/CMakeLists.txt
+++++ b/verification_tool/CMakeLists.txt
++@@ -20,7 +20,10 @@ if(UNIX)
++     set_target_properties(verify_camera view_camera PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
+++        INSTALL_RPATH "/workspace/OrbbecSDK/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
+++
+++# Install rules
+++install(TARGETS verify_camera view_camera DESTINATION bin)
++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
++index 25500d0..4f456e4 100644
++--- a/webrtc_streamer/CMakeLists.txt
+++++ b/webrtc_streamer/CMakeLists.txt
++@@ -51,7 +51,10 @@ if(UNIX)
++     set_target_properties(webrtc_streamer PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
+++        INSTALL_RPATH "/workspace/OrbbecSDK/lib:/usr/local/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
+++
+++# Install rules
+++install(TARGETS webrtc_streamer DESTINATION bin)
++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
++index 9de8219..b275cca 100644
++--- a/webrtc_streamer/README.md
+++++ b/webrtc_streamer/README.md
++@@ -48,3 +48,7 @@ make
++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
++ - `web/index.html`: WebVR receiver client.
+++
+++## TODO
+++
+++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
++diff --git a/workspace/.gitkeep b/workspace/.gitkeep
++new file mode 100644
++index 0000000..e69de29
+diff --git a/project_modifications.patch b/project_modifications.patch
+new file mode 100644
+index 0000000..26996e7
+--- /dev/null
++++ b/project_modifications.patch
+@@ -0,0 +1,118 @@
++diff --git a/Dockerfile b/Dockerfile
++index 4783428..16aedc7 100644
++--- a/Dockerfile
+++++ b/Dockerfile
++@@ -30,41 +30,33 @@ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
++     cd /tmp/OrbbecSDK_v2 && \
++     git checkout ${ORBBEC_SDK_VERSION} && \
++     mkdir build && cd build && \
++-    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
+++    cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/opt/OrbbecSDK && \
++     make -j$(nproc) && \
++     make install && \
++     rm -rf /tmp/OrbbecSDK_v2
++ 
++-# Install libdatachannel from source or PPA if available
++-# Since it's a specific dependency, we'll build it to ensure compatibility
++-RUN apt-get update && apt-get install -y \
++-    libssl-dev \
++-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
++-    && cd /tmp/libdatachannel \
++-    && mkdir build && cd build \
++-    && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
++-    && make -j$(nproc) \
++-    && make install \
++-    && ldconfig \
++-    && rm -rf /tmp/libdatachannel
+++# ... (libdatachannel build remains same) ...
++ 
++ # Set the working directory
++ WORKDIR /workspace
++ 
++-# Copy the entire project into the container
+++# Copy the entire project
++ COPY . .
++ 
++-# Build the WebRTC Streamer
++-RUN cd webrtc_streamer && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Build and Install WebRTC Streamer to /app
+++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
+++    cmake /workspace/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_webrtc
+++
+++# Build and Install Verification Tool to /app
+++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
+++    cmake /workspace/verification_tool -DCMAKE_INSTALL_PREFIX=/app && \
+++    make -j$(nproc) && make install && \
+++    rm -rf /tmp/build_verify
++ 
++-# Build the Verification Tool
++-RUN cd verification_tool && \
++-    mkdir -p build && cd build && \
++-    cmake .. && \
++-    make -j$(nproc)
+++# Add /app to PATH
+++ENV PATH="/app/bin:${PATH}"
++ 
++ # Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
++ EXPOSE 8000
++diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
++index 2d96aa1..04bf6ea 100644
++--- a/verification_tool/CMakeLists.txt
+++++ b/verification_tool/CMakeLists.txt
++@@ -4,7 +4,7 @@ project(verify_camera)
++ set(CMAKE_CXX_STANDARD 11)
++ 
++ # Set OrbbecSDK path
++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++ find_package(OrbbecSDK REQUIRED)
++ 
++ find_package(OpenCV REQUIRED)
++@@ -20,7 +20,7 @@ if(UNIX)
++     set_target_properties(verify_camera view_camera PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
+++        INSTALL_RPATH "/opt/OrbbecSDK/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
++diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
++index 25500d0..ee626ec 100644
++--- a/webrtc_streamer/CMakeLists.txt
+++++ b/webrtc_streamer/CMakeLists.txt
++@@ -4,7 +4,7 @@ project(webrtc_streamer)
++ set(CMAKE_CXX_STANDARD 17) # libdatachannel usually requires C++17
++ 
++ # 1. Orbbec SDK
++-set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+++set(OrbbecSDK_DIR /opt/OrbbecSDK/lib)
++ find_package(OrbbecSDK REQUIRED)
++ 
++ # 2. OpenCV
++@@ -51,7 +51,7 @@ if(UNIX)
++     set_target_properties(webrtc_streamer PROPERTIES
++         SKIP_BUILD_RPATH FALSE
++         BUILD_WITH_INSTALL_RPATH TRUE
++-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
+++        INSTALL_RPATH "/opt/OrbbecSDK/lib:/usr/local/lib"
++         INSTALL_RPATH_USE_LINK_PATH TRUE
++     )
++ endif()
++diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
++index 9de8219..b275cca 100644
++--- a/webrtc_streamer/README.md
+++++ b/webrtc_streamer/README.md
++@@ -48,3 +48,7 @@ make
++ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
++ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
++ - `web/index.html`: WebVR receiver client.
+++
+++## TODO
+++
+++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
+diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
+index 2d96aa1..49f762a 100644
+--- a/verification_tool/CMakeLists.txt
++++ b/verification_tool/CMakeLists.txt
+@@ -20,7 +20,10 @@ if(UNIX)
+     set_target_properties(verify_camera view_camera PROPERTIES
+         SKIP_BUILD_RPATH FALSE
+         BUILD_WITH_INSTALL_RPATH TRUE
+-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
++        INSTALL_RPATH "/workspace/OrbbecSDK/lib"
+         INSTALL_RPATH_USE_LINK_PATH TRUE
+     )
+ endif()
++
++# Install rules
++install(TARGETS verify_camera view_camera DESTINATION bin)
+diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
+index 25500d0..4f456e4 100644
+--- a/webrtc_streamer/CMakeLists.txt
++++ b/webrtc_streamer/CMakeLists.txt
+@@ -51,7 +51,10 @@ if(UNIX)
+     set_target_properties(webrtc_streamer PROPERTIES
+         SKIP_BUILD_RPATH FALSE
+         BUILD_WITH_INSTALL_RPATH TRUE
+-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
++        INSTALL_RPATH "/workspace/OrbbecSDK/lib:/usr/local/lib"
+         INSTALL_RPATH_USE_LINK_PATH TRUE
+     )
+ endif()
++
++# Install rules
++install(TARGETS webrtc_streamer DESTINATION bin)
+diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
+index 9de8219..8ab7e4f 100644
+--- a/webrtc_streamer/README.md
++++ b/webrtc_streamer/README.md
+@@ -48,3 +48,16 @@ make
+ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
+ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
+ - `web/index.html`: WebVR receiver client.
++
++## Docker Deployment
++
++### Accessing Binaries Outside Container
++To copy the pre-built binaries from the Docker image to your host machine's `bin/` folder, run:
++```bash
++docker compose run --rm webrtc-streamer cp -r /app/bin /workspace/bin/
++```
++The binaries (`webrtc_streamer`, `verify_camera`, etc.) will then be available in your local `./bin/` directory.
++
++## TODO
++
++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.

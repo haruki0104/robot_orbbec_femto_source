@@ -1,0 +1,229 @@
+diff --git a/Dockerfile b/Dockerfile
+index 4783428..a7334cd 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,5 +1,5 @@
+-# Use Ubuntu 24.04 as the base image
+-FROM ubuntu:24.04
++# --- Stage 1: Builder ---
++FROM ubuntu:24.04 AS builder
+ 
+ # Avoid interactive prompts during package installation
+ ENV DEBIAN_FRONTEND=noninteractive
+@@ -19,57 +19,89 @@ RUN apt-get update && apt-get install -y \
+     libavformat-dev \
+     libavutil-dev \
+     libswscale-dev \
+-    python3 \
+     && rm -rf /var/lib/apt/lists/*
+ 
+ # Configurable Orbbec SDK version
+ ARG ORBBEC_SDK_VERSION=v2.7.6
+ 
+-# Build and install Orbbec SDK v2 from source
++# Build and install Orbbec SDK v2 from source to /workspace/OrbbecSDK
+ RUN git clone https://github.com/orbbec/OrbbecSDK_v2.git /tmp/OrbbecSDK_v2 && \
+     cd /tmp/OrbbecSDK_v2 && \
+     git checkout ${ORBBEC_SDK_VERSION} && \
+     mkdir build && cd build && \
+     cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX=/workspace/OrbbecSDK && \
+     make -j$(nproc) && \
+-    make install && \
+-    rm -rf /tmp/OrbbecSDK_v2
++    make install
+ 
+-# Install libdatachannel from source or PPA if available
+-# Since it's a specific dependency, we'll build it to ensure compatibility
+-RUN apt-get update && apt-get install -y \
+-    libssl-dev \
+-    && git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
++# Build libdatachannel from source to /usr/local
++RUN git clone --recursive https://github.com/paullouisageneau/libdatachannel.git /tmp/libdatachannel \
+     && cd /tmp/libdatachannel \
+     && mkdir build && cd build \
+     && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_GNUTLS=0 -DUSE_NICE=0 \
+     && make -j$(nproc) \
+-    && make install \
+-    && ldconfig \
+-    && rm -rf /tmp/libdatachannel
+-
+-# Set the working directory
+-WORKDIR /workspace
++    && make install
+ 
+-# Copy the entire project into the container
++# Copy project source
++WORKDIR /src
+ COPY . .
+ 
+-# Build the WebRTC Streamer
+-RUN cd webrtc_streamer && \
+-    mkdir -p build && cd build && \
+-    cmake .. && \
+-    make -j$(nproc)
++# Build and Install WebRTC Streamer to /app
++RUN mkdir -p /tmp/build_webrtc && cd /tmp/build_webrtc && \
++    cmake /src/webrtc_streamer -DCMAKE_INSTALL_PREFIX=/app -DOrbbecSDK_DIR=/workspace/OrbbecSDK/lib && \
++    make -j$(nproc) && make install
++
++# Build and Install Verification Tool to /app
++RUN mkdir -p /tmp/build_verify && cd /tmp/build_verify && \
++    cmake /src/verification_tool -DCMAKE_INSTALL_PREFIX=/app -DOrbbecSDK_DIR=/workspace/OrbbecSDK/lib && \
++    make -j$(nproc) && make install
++
++
++# --- Stage 2: Runtime ---
++FROM ubuntu:24.04 AS runtime
++
++# Avoid interactive prompts
++ENV DEBIAN_FRONTEND=noninteractive
++
++# Install ONLY runtime dependencies
++RUN apt-get update && apt-get install -y \
++    libusb-1.0-0 \
++    libssl3 \
++    libudev1 \
++    libopencv-core4.5 \
++    libopencv-imgproc4.5 \
++    libopencv-imgcodecs4.5 \
++    libopencv-videoio4.5 \
++    libavcodec60 \
++    libavformat60 \
++    libavutil58 \
++    libswscale7 \
++    python3 \
++    && rm -rf /var/lib/apt/lists/* || true
++# Note: Exact opencv/ffmpeg library versions might vary slightly on Noble; 
++# installing the main shared lib packages is safer:
++RUN apt-get update && apt-get install -y \
++    libopencv-videoio-dev \
++    libavcodec-dev \
++    libswscale-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# Copy built artifacts from builder
++COPY --from=builder /workspace/OrbbecSDK /workspace/OrbbecSDK
++COPY --from=builder /app /app
++COPY --from=builder /usr/local/lib/libdatachannel.so* /usr/local/lib/
++COPY --from=builder /src/webrtc_streamer/web /app/web
+ 
+-# Build the Verification Tool
+-RUN cd verification_tool && \
+-    mkdir -p build && cd build && \
+-    cmake .. && \
+-    make -j$(nproc)
++# Update library cache
++RUN ldconfig
++
++# Set environment
++WORKDIR /workspace
++ENV PATH="/app/bin:${PATH}"
+ 
+-# Expose ports (8000 for the web server, 8080 for signaling, and UDP range for WebRTC)
++# Expose ports
+ EXPOSE 8000
+ EXPOSE 8080
+ EXPOSE 10000-10100/udp
+ 
+-# Set the default command to show help or enter a shell
++# Default command
+ CMD ["/bin/bash"]
+diff --git a/docker-compose.yml b/docker-compose.yml
+index cf6d384..4ffa398 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -3,7 +3,7 @@ services:
+     build:
+       context: .
+       dockerfile: Dockerfile
+-    image: orbbec-webrtc-dev:latest
++    image: orbbec-webrtc-dev:v1.0.0
+     container_name: orbbec_streamer_container
+     # Privileged mode and USB mounting are required for hardware camera access
+     privileged: true
+diff --git a/verification_tool/CMakeLists.txt b/verification_tool/CMakeLists.txt
+index 2d96aa1..49f762a 100644
+--- a/verification_tool/CMakeLists.txt
++++ b/verification_tool/CMakeLists.txt
+@@ -20,7 +20,10 @@ if(UNIX)
+     set_target_properties(verify_camera view_camera PROPERTIES
+         SKIP_BUILD_RPATH FALSE
+         BUILD_WITH_INSTALL_RPATH TRUE
+-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib"
++        INSTALL_RPATH "/workspace/OrbbecSDK/lib"
+         INSTALL_RPATH_USE_LINK_PATH TRUE
+     )
+ endif()
++
++# Install rules
++install(TARGETS verify_camera view_camera DESTINATION bin)
+diff --git a/webrtc_streamer/CMakeLists.txt b/webrtc_streamer/CMakeLists.txt
+index 25500d0..4f456e4 100644
+--- a/webrtc_streamer/CMakeLists.txt
++++ b/webrtc_streamer/CMakeLists.txt
+@@ -51,7 +51,10 @@ if(UNIX)
+     set_target_properties(webrtc_streamer PROPERTIES
+         SKIP_BUILD_RPATH FALSE
+         BUILD_WITH_INSTALL_RPATH TRUE
+-        INSTALL_RPATH "$ORIGIN/../../OrbbecSDK/lib:/usr/local/lib"
++        INSTALL_RPATH "/workspace/OrbbecSDK/lib:/usr/local/lib"
+         INSTALL_RPATH_USE_LINK_PATH TRUE
+     )
+ endif()
++
++# Install rules
++install(TARGETS webrtc_streamer DESTINATION bin)
+diff --git a/webrtc_streamer/README.md b/webrtc_streamer/README.md
+index 9de8219..8ab7e4f 100644
+--- a/webrtc_streamer/README.md
++++ b/webrtc_streamer/README.md
+@@ -48,3 +48,16 @@ make
+ - `src/sbs_compositor.hpp`: Logic for frame merging and depth normalization.
+ - `src/h264_encoder.hpp`: FFmpeg-based H.264 video encoding.
+ - `web/index.html`: WebVR receiver client.
++
++## Docker Deployment
++
++### Accessing Binaries Outside Container
++To copy the pre-built binaries from the Docker image to your host machine's `bin/` folder, run:
++```bash
++docker compose run --rm webrtc-streamer cp -r /app/bin /workspace/bin/
++```
++The binaries (`webrtc_streamer`, `verify_camera`, etc.) will then be available in your local `./bin/` directory.
++
++## TODO
++
++- [ ] **Automated Signaling**: Replace the manual SDP copy-paste process with a WebSocket-based signaling server (e.g., using a simple Python/FastAPI or Node.js relay) for a seamless "plug-and-play" connection experience.
+diff --git a/webrtc_streamer/web/index.html b/webrtc_streamer/web/index.html
+index 790c0f0..dfbf84b 100644
+--- a/webrtc_streamer/web/index.html
++++ b/webrtc_streamer/web/index.html
+@@ -37,6 +37,7 @@
+             renderer = new THREE.WebGLRenderer({ antialias: true });
+             renderer.setSize(window.innerWidth, window.innerHeight);
+             renderer.xr.enabled = true;
++            renderer.xr.setReferenceSpaceType('local');
+             document.body.appendChild(renderer.domElement);
+ 
+             // Add OrbitControls for non-VR navigation
+@@ -57,12 +58,14 @@
+                 if (isSupported) {
+                     vrButton.textContent = 'Enter VR';
+                     vrButton.onclick = () => {
+-                        navigator.xr.requestSession('immersive-vr')
+-                            .then(s => renderer.xr.setSession(s))
+-                            .catch(err => {
+-                                console.error("Failed to start VR session:", err);
+-                                alert("VR Error: " + err.message);
+-                            });
++                        navigator.xr.requestSession('immersive-vr', {
++                            optionalFeatures: ['local-floor', 'bounded-floor']
++                        })
++                        .then(s => renderer.xr.setSession(s))
++                        .catch(err => {
++                            console.error("Failed to start VR session:", err);
++                            alert("VR Error: " + err.message);
++                        });
+                     };
+                 } else {
+                     vrButton.textContent = 'VR Not Supported on this Device';

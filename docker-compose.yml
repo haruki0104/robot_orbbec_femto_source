@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: orbbec-webrtc-dev:latest
+    image: orbbec-webrtc-dev:v1.0.0
     container_name: orbbec_streamer_container
     # Privileged mode and USB mounting are required for hardware camera access
     privileged: true
