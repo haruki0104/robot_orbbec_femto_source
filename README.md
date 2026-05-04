@@ -48,3 +48,47 @@ cd webrtc_streamer
 
 ## License
 Apache-2.0
+
+## Developer Guide
+
+### Project Architecture
+The project is divided into three main components, all sharing the same **OrbbecSDK v2** core:
+1.  **Verification Tool**: Lightweight C++ tools for hardware validation.
+2.  **ROS 2 Bridge**: Integration with ROS 2 (Jazzy/Humble) for robotics applications.
+3.  **WebRTC Streamer**: A high-performance, bi-directional streaming solution for WebVR and remote monitoring.
+
+### Building the Project
+The build system is designed to work both inside a container (target path `/workspace`) and in local development environments. It automatically detects the OrbbecSDK location.
+
+#### Building All Components
+```bash
+# Verification Tool
+cd verification_tool && mkdir -p build && cd build && cmake .. && make
+
+# WebRTC Streamer
+cd webrtc_streamer && mkdir -p build && cd build && cmake .. && make
+
+# ROS 2 Bridge
+cd ros2_bridge && colcon build
+```
+
+### WebRTC Remote Control System
+The WebRTC streamer uses a **Data Channel** named `control` to receive hardware commands from the browser.
+
+#### Communication Protocol
+Messages are sent as simple JSON strings from the browser:
+*   `{"type": "laser", "value": true/false}`: Toggles the IR laser.
+*   `{"type": "viz_mode", "value": 0/1/2}`: Switches between SBS (3D), Color, and Depth views.
+*   `{"type": "exposure", "value": <int>}`: Manually sets color exposure.
+
+#### Extending Remote Control
+To add a new control:
+1.  **C++**: Add a case in `WebRtcSbsStreamer::handleControlMessage` in `webrtc_streamer/src/main.cpp`. Use `device->setIntProperty` or `device->setBoolProperty` with a property ID from `OrbbecSDK/include/libobsensor/h/Property.h`.
+2.  **Web**: Add a UI element in `webrtc_streamer/web/index.html` that calls `sendControl('your_property', value)`.
+
+### Visualization Compositor
+The `SbsCompositor` class (`webrtc_streamer/src/sbs_compositor.hpp`) handles the layout of frames. It supports:
+*   **Depth Heatmaps**: Toggled via `useColormap`.
+*   **Text Overlays**: Configurable via `showOverlay`.
+*   **Mode Switching**: Dynamic layout changes without re-initializing the video encoder.
+

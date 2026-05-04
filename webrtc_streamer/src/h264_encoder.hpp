@@ -82,6 +82,9 @@ public:
         return packetData;
     }
 
+    int getWidth() const { return width; }
+    int getHeight() const { return height; }
+
 private:
     AVCodecContext* codecContext = nullptr;
     AVFrame* frame = nullptr;

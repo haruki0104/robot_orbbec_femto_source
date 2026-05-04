@@ -11,12 +11,18 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 
-# Find OrbbecSDK (adjust path if needed)
-set(OrbbecSDK_DIR ${CMAKE_CURRENT_LIST_DIR}/../OrbbecSDK/lib)
+# Find OrbbecSDK
+if(EXISTS "/workspace/OrbbecSDK/lib")
+    set(OrbbecSDK_DIR /workspace/OrbbecSDK/lib)
+    set(OBS_LIB_PATH "/workspace/OrbbecSDK/lib")
+else()
+    set(OrbbecSDK_DIR ${CMAKE_CURRENT_LIST_DIR}/../OrbbecSDK/lib)
+    set(OBS_LIB_PATH "${CMAKE_CURRENT_LIST_DIR}/../OrbbecSDK/lib")
+endif()
 find_package(OrbbecSDK REQUIRED)
 
 # Set RPATH so the library is found without LD_LIBRARY_PATH
-set(CMAKE_INSTALL_RPATH "${OrbbecSDK_DIR}")
+set(CMAKE_INSTALL_RPATH "${OBS_LIB_PATH}")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
 
 add_executable(femto_mega_node src/femto_mega_node.cpp)
