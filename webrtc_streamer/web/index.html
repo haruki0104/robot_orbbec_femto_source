@@ -17,14 +17,10 @@
 </head>
 <body>
     <div id="ui">
-        <h3>Signaling (Manual)</h3>
-        <label>1. Paste SDP from C++ Tool here:</label>
-        <textarea id="remoteSdp" placeholder="Paste SDP here..."></textarea>
-        <button onclick="startConnection()">2. Connect & Generate Answer</button>
-        
-        <label>3. Copy this Answer back to C++ Tool:</label>
-        <textarea id="localSdp" readonly placeholder="Answer will appear here..."></textarea>
+        <h3>Signaling (Automated)</h3>
+        <div id="signalingStatus">Signaling Server: Connecting...</div>
         <div id="status">Status: Waiting for Offer...</div>
+        <div id="log" style="margin-top:10px; font-size: 10px; color: #aaa; height: 60px; overflow-y: auto; border: 1px solid #333; padding: 2px;"></div>
 
         <div id="controls" style="margin-top:20px; border-top: 1px solid #555; padding-top:10px;">
             <h3>Remote Control</h3>
@@ -63,15 +59,23 @@
                 <label>Show Overlay: </label>
                 <input type="checkbox" checked onchange="changeOverlay(this.checked)">
             </div>
+            <div style="margin-top:10px; border-top: 1px solid #444; padding-top:10px;">
+                <button onclick="toggleDebug()">Toggle Debug Video</button>
+            </div>
         </div>
     </div>
 
-    <video id="remoteVideo" autoplay playsinline style="display:none;"></video>
+    <video id="remoteVideo" autoplay playsinline style="display:none; position: absolute; bottom: 10px; right: 10px; width: 320px; border: 2px solid white; z-index: 200; background: #222;"></video>
 
     <script>
         let scene, camera, renderer, video, videoTexture, mesh, orbitControls;
         let dataChannel;
         let shaderMaterial;
+
+        function toggleDebug() {
+            const v = document.getElementById('remoteVideo');
+            v.style.display = (v.style.display === 'none' ? 'block' : 'none');
+        }
         let pc = new RTCPeerConnection({
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         });
@@ -98,36 +102,79 @@
             }
         }
 
-        async function startConnection() {
-            const remoteSdp = document.getElementById('remoteSdp').value;
-            if (!remoteSdp) {
-                alert("Please paste the SDP offer first!");
-                return;
-            }
-
-            try {
-                document.getElementById('status').innerText = "Status: Connecting...";
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                
-                // Wait for ICE gathering to finish to get a complete SDP with candidates
-                pc.onicecandidate = event => {
-                    if (event.candidate === null) {
-                        document.getElementById('localSdp').value = pc.localDescription.sdp;
-                        document.getElementById('status').innerText = "Status: Answer Generated. Copy it back!";
-                    }
-                };
-                
-                // If ICE gathering is already complete or very fast
-                if (pc.iceGatheringState === 'complete') {
-                    document.getElementById('localSdp').value = pc.localDescription.sdp;
-                }
-            } catch (e) {
-                console.error(e);
-                document.getElementById('status').innerText = "Status: Error " + e.message;
-            }
+        function log(msg) {
+            const div = document.getElementById('log');
+            div.innerText += msg + "\n";
+            div.scrollTop = div.scrollHeight;
+            console.log(msg);
         }
+
+        // --- Automated Signaling ---
+        const ws = new WebSocket('ws://' + (window.location.hostname || '127.0.0.1') + ':8889');
+        const sigStatus = document.getElementById('signalingStatus');
+        const status = document.getElementById('status');
+
+        let offerReceived = false;
+
+        ws.onopen = () => {
+            sigStatus.innerText = "Signaling Server: Connected";
+            sigStatus.style.color = "#0f0";
+            log("Connected to signaling server");
+            
+            // Periodically request offer until we get one
+            const requestInterval = setInterval(() => {
+                if (offerReceived) {
+                    clearInterval(requestInterval);
+                } else {
+                    ws.send("request");
+                    log("Sent 'request' to streamer...");
+                }
+            }, 2000);
+        };
+
+        ws.onclose = () => {
+            sigStatus.innerText = "Signaling Server: Disconnected";
+            sigStatus.style.color = "#f00";
+            log("Disconnected from signaling server");
+        };
+
+        ws.onmessage = async (event) => {
+            const msg = event.data;
+            log("WS Received: " + msg.substr(0, 30) + "...");
+            
+            if (msg.includes('v=0') && (msg.includes('m=video') || msg.includes('a=fingerprint'))) {
+                offerReceived = true;
+                log("Recognized as SDP Offer!");
+                status.innerText = "Status: Offer Received. Connecting...";
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: msg }));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    log("SDP Answer generated and sent");
+                    ws.send(pc.localDescription.sdp);
+                } catch (e) {
+                    log("SDP Error: " + e.message);
+                    status.innerText = "Status: Error " + e.message;
+                }
+            } else {
+                log("Message ignored (not a valid SDP Offer)");
+            }
+        };
+
+        pc.onicegatheringstatechange = () => {
+            log("ICE State: " + pc.iceGatheringState);
+            if (pc.iceGatheringState === 'complete') {
+                log("Sending Answer to streamer");
+                ws.send(pc.localDescription.sdp);
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            log("WebRTC State: " + pc.connectionState);
+            if (pc.connectionState === 'connected') {
+                status.innerText = "Status: Streaming Active!";
+            }
+        };
 
         pc.ontrack = event => {
             console.log("Received remote track:", event.track.kind);

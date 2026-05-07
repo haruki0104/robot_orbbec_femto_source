@@ -40,6 +40,7 @@ include_directories(
 )
 
 add_executable(webrtc_streamer src/main.cpp)
+add_executable(signaling_server src/signaling_server.cpp)
 
 target_link_libraries(webrtc_streamer 
     PRIVATE 
@@ -52,9 +53,15 @@ target_link_libraries(webrtc_streamer
     ${SWSCALE_LIBRARIES}
 )
 
+target_link_libraries(signaling_server
+    PRIVATE
+    ${LIBDATACHANNEL_LIBRARIES}
+    datachannel
+)
+
 # RPATH for OrbbecSDK and libdatachannel
 if(UNIX)
-    set_target_properties(webrtc_streamer PROPERTIES
+    set_target_properties(webrtc_streamer signaling_server PROPERTIES
         SKIP_BUILD_RPATH FALSE
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "${OBS_LIB_PATH}:/usr/local/lib"
@@ -63,4 +70,4 @@ if(UNIX)
 endif()
 
 # Install rules
-install(TARGETS webrtc_streamer DESTINATION bin)
+install(TARGETS webrtc_streamer signaling_server DESTINATION bin)

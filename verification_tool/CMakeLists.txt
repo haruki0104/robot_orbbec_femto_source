@@ -15,15 +15,24 @@ find_package(OrbbecSDK REQUIRED)
 
 find_package(OpenCV REQUIRED)
 
+include_directories(
+    ${OrbbecSDK_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../webrtc_streamer/src
+)
+
 add_executable(verify_camera verify_camera.cpp)
 target_link_libraries(verify_camera PRIVATE ob::OrbbecSDK)
 
 add_executable(view_camera view_camera.cpp)
 target_link_libraries(view_camera PRIVATE ob::OrbbecSDK ${OpenCV_LIBS})
 
+add_executable(view_sbs view_sbs.cpp)
+target_link_libraries(view_sbs PRIVATE ob::OrbbecSDK ${OpenCV_LIBS})
+
 # RPATH for finding the library at runtime
 if(UNIX)
-    set_target_properties(verify_camera view_camera PROPERTIES
+    set_target_properties(verify_camera view_camera view_sbs PROPERTIES
         SKIP_BUILD_RPATH FALSE
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "${OBS_LIB_PATH}"
@@ -32,4 +41,4 @@ if(UNIX)
 endif()
 
 # Install rules
-install(TARGETS verify_camera view_camera DESTINATION bin)
+install(TARGETS verify_camera view_camera view_sbs DESTINATION bin)

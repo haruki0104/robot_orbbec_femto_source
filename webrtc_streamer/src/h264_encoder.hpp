@@ -33,6 +33,7 @@ public:
 
         av_opt_set(codecContext->priv_data, "preset", "ultrafast", 0);
         av_opt_set(codecContext->priv_data, "tune", "zerolatency", 0);
+        av_opt_set(codecContext->priv_data, "x264opts", "repeat-headers=1", 0);
 
         if (avcodec_open2(codecContext, codec, NULL) < 0) {
             throw std::runtime_error("Could not open codec");
