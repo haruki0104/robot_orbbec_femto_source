@@ -63,26 +63,25 @@ FROM ubuntu:24.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install ONLY runtime dependencies
+# Note: Ubuntu 24.04 (Noble) uses OpenCV 4.6.0 with t64 suffix for library packages
 RUN apt-get update && apt-get install -y \
     libusb-1.0-0 \
     libssl3 \
     libudev1 \
-    libopencv-core4.5 \
-    libopencv-imgproc4.5 \
-    libopencv-imgcodecs4.5 \
-    libopencv-videoio4.5 \
+    libopencv-core406t64 \
+    libopencv-imgproc406t64 \
+    libopencv-imgcodecs406t64 \
+    libopencv-videoio406t64 \
+    libopencv-highgui406t64 \
     libavcodec60 \
     libavformat60 \
     libavutil58 \
     libswscale7 \
     python3 \
-    && rm -rf /var/lib/apt/lists/* || true
-# Note: Exact opencv/ffmpeg library versions might vary slightly on Noble; 
-# installing the main shared lib packages is safer:
-RUN apt-get update && apt-get install -y \
-    libopencv-videoio-dev \
-    libavcodec-dev \
-    libswscale-dev \
+    libx11-6 \
+    libxcb1 \
+    libxau6 \
+    libxdmcp6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built artifacts from builder
