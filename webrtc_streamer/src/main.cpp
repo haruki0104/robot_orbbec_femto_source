@@ -20,49 +20,56 @@ class WebRtcSbsStreamer {
 public:
     WebRtcSbsStreamer() {
         // 1. Initialize Orbbec SDK
-        pipeline = std::make_shared<ob::Pipeline>();
-        auto config = std::make_shared<ob::Config>();
-
-        // 1.1 Dynamically find supported profiles instead of hardcoding
-        auto colorProfiles = pipeline->getStreamProfileList(OB_SENSOR_COLOR);
-        auto depthProfiles = pipeline->getStreamProfileList(OB_SENSOR_DEPTH);
-
-        if (!colorProfiles || !depthProfiles) {
-            throw std::runtime_error("Could not find Color or Depth sensor profiles");
-        }
-
-        // Try to find a reasonable profile, or just take the first one
-        std::shared_ptr<ob::VideoStreamProfile> colorProfile;
         try {
-            colorProfile = colorProfiles->getVideoStreamProfile(640, 480, OB_FORMAT_ANY, 30);
-        } catch (...) {
-            colorProfile = colorProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
+            pipeline = std::make_shared<ob::Pipeline>();
+            auto config = std::make_shared<ob::Config>();
+
+            // 1.1 Dynamically find supported profiles instead of hardcoding
+            auto colorProfiles = pipeline->getStreamProfileList(OB_SENSOR_COLOR);
+            auto depthProfiles = pipeline->getStreamProfileList(OB_SENSOR_DEPTH);
+
+            if (!colorProfiles || !depthProfiles) {
+                throw std::runtime_error("Could not find Color or Depth sensor profiles");
+            }
+
+            // Try to find a reasonable profile, or just take the first one
+            std::shared_ptr<ob::VideoStreamProfile> colorProfile;
+            try {
+                colorProfile = colorProfiles->getVideoStreamProfile(640, 480, OB_FORMAT_ANY, 30);
+            } catch (...) {
+                colorProfile = colorProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
+            }
+
+            std::shared_ptr<ob::VideoStreamProfile> depthProfile;
+            try {
+                depthProfile = depthProfiles->getVideoStreamProfile(640, 480, OB_FORMAT_ANY, 30);
+            } catch (...) {
+                depthProfile = depthProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
+            }
+
+            config->enableStream(colorProfile);
+            config->enableStream(depthProfile);
+
+            // MANDATORY: Align Depth to Color for SBS reconstruction
+            config->setAlignMode(ALIGN_D2C_HW_MODE);
+
+            pipeline->start(config);
+            
+            // Get device for remote control
+            device = pipeline->getDevice();
+            
+            colorWidth = colorProfile->width();
+            colorHeight = colorProfile->height();
+            
+            std::cout << "Camera started with D2C alignment." << std::endl;
+            dummyMode = false;
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Could not initialize camera: " << e.what() << std::endl;
+            std::cerr << "Entering DUMMY MODE for signaling verification." << std::endl;
+            colorWidth = 640;
+            colorHeight = 480;
+            dummyMode = true;
         }
-
-        std::shared_ptr<ob::VideoStreamProfile> depthProfile;
-        try {
-            depthProfile = depthProfiles->getVideoStreamProfile(640, 480, OB_FORMAT_ANY, 30);
-        } catch (...) {
-            depthProfile = depthProfiles->getProfile(0)->as<ob::VideoStreamProfile>();
-        }
-
-        config->enableStream(colorProfile);
-        config->enableStream(depthProfile);
-
-        // MANDATORY: Align Depth to Color for SBS reconstruction
-        config->setAlignMode(ALIGN_D2C_HW_MODE);
-
-        pipeline->start(config);
-        
-        // Get device for remote control
-        device = pipeline->getDevice();
-        
-        int colorWidth = colorProfile->width();
-        int colorHeight = colorProfile->height();
-        
-        std::cout << "Camera started with D2C alignment." << std::endl;
-        std::cout << "Color Profile: " << colorWidth << "x" << colorHeight << " format: " << colorProfile->format() << std::endl;
-        std::cout << "Depth Profile: " << depthProfile->width() << "x" << depthProfile->height() << " format: " << depthProfile->format() << std::endl;
 
         // 2. Initialize H.264 Encoder (SBS width is colorWidth * 2)
         encoder = std::make_unique<H264Encoder>(colorWidth * 2, colorHeight, 30);
@@ -77,15 +84,8 @@ public:
             std::cout << "WebRTC State change: " << state << std::endl;
         });
 
-        pc->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
-            std::cout << "WebRTC Gathering State change: " << state << std::endl;
-            if (state == rtc::PeerConnection::GatheringState::Complete) {
-                auto description = pc->localDescription();
-                std::cout << "\n--- START LOCAL DESCRIPTION (SDP) ---" << std::endl;
-                std::cout << std::string(*description) << std::endl;
-                std::cout << "--- END LOCAL DESCRIPTION (SDP) ---\n" << std::endl;
-                std::cout << "Copy the COMPLETE SDP above into the client signaling input." << std::endl;
-            }
+        pc->onIceStateChange([](rtc::PeerConnection::IceState state) {
+            std::cout << "ICE State change: " << state << std::endl;
         });
 
         // Add Data Channel for Remote Control
@@ -107,27 +107,67 @@ public:
         videoDescription.addH264Codec(96); // PT=96
         videoTrack = pc->addTrack(videoDescription);
 
-        // Create the offer
-        pc->setLocalDescription(); 
+        // 4. Initialize Signaling WebSocket
+        ws = std::make_shared<rtc::WebSocket>();
 
-        // Add a thread to wait for the Answer from the browser
-        std::thread([this]() {
-            std::cout << "Waiting for Answer from browser... Paste it below and press Enter twice:" << std::endl;
-            std::string answer;
-            std::string line;
-            while (std::getline(std::cin, line)) {
-                if (line.empty()) break;
-                answer += line + "\n";
-            }
-            if (!answer.empty()) {
-                try {
-                    pc->setRemoteDescription(rtc::Description(answer, "answer"));
-                    std::cout << "Remote description set successfully!" << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "Error setting remote description: " << e.what() << std::endl;
+        ws->onOpen([this]() {
+            std::cout << "Connected to signaling server!" << std::endl;
+            // Create the offer once connected to signaling
+            pc->setLocalDescription();
+        });
+
+        ws->onMessage([this](rtc::message_variant message) {
+            if (std::holds_alternative<std::string>(message)) {
+                std::string msg = std::get<std::string>(message);
+                
+                // If browser requests an offer, or if it's an answer
+                if (msg == "request") {
+                    std::cout << "Received request from browser. Sending offer..." << std::endl;
+                    if (pc->localDescription()) {
+                        ws->send(std::string(*pc->localDescription()));
+                    } else {
+                        pc->setLocalDescription();
+                    }
+                } else if (msg.find("v=0") != std::string::npos && msg.find("m=video") != std::string::npos) {
+                    std::cout << "Received SDP Answer via signaling." << std::endl;
+                    try {
+                        // libdatachannel can often parse the type from the SDP or we assume answer
+                        pc->setRemoteDescription(rtc::Description(msg, "answer"));
+                        std::cout << "Remote description (Answer) set successfully!" << std::endl;
+                    } catch (const std::exception& e) {
+                        std::cerr << "Error setting remote description: " << e.what() << std::endl;
+                    }
                 }
             }
-        }).detach();
+        });
+
+        ws->onError([](std::string error) {
+            std::cerr << "Signaling WebSocket error: " << error << std::endl;
+        });
+
+        ws->onClosed([]() {
+            std::cout << "Signaling WebSocket closed." << std::endl;
+        });
+
+        // Connect to local signaling server
+        ws->open("ws://127.0.0.1:8889");
+
+        pc->onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
+            std::cout << "WebRTC Gathering State change: " << state << std::endl;
+            if (state == rtc::PeerConnection::GatheringState::Complete) {
+                auto description = pc->localDescription();
+                std::cout << "\n--- LOCAL DESCRIPTION READY ---" << std::endl;
+                
+                // Send offer to signaling server
+                if (ws->isOpen()) {
+                    std::string sdp = std::string(*description);
+                    // Wrap in simple JSON for the browser if needed, but the browser side
+                    // will be updated to handle this.
+                    ws->send(sdp);
+                    std::cout << "SDP Offer sent to signaling server." << std::endl;
+                }
+            }
+        });
     }
 
     void handleControlMessage(const std::string& msg) {
@@ -180,22 +220,43 @@ public:
         cv::Mat sbsFrame;
         std::cout << "Streaming loop started. Waiting for WebRTC connection..." << std::endl;
         
+        int frameCounter = 0;
         while (running) {
-            auto frameset = pipeline->waitForFrameset(100);
-            if (!frameset) continue;
+            if (dummyMode) {
+                // Generate synthetic SBS frame
+                sbsFrame = cv::Mat::zeros(colorHeight, colorWidth * 2, CV_8UC3);
+                
+                // Left side: Color dummy (changing colors + moving text)
+                cv::rectangle(sbsFrame, cv::Rect(0, 0, colorWidth, colorHeight), cv::Scalar(frameCounter % 255, 100, 200), -1);
+                cv::putText(sbsFrame, "DUMMY COLOR", cv::Point(50, colorHeight/2), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(255, 255, 255), 3);
+                
+                // Right side: Depth dummy (gradient + moving circle)
+                cv::rectangle(sbsFrame, cv::Rect(colorWidth, 0, colorWidth, colorHeight), cv::Scalar(50, 50, 50), -1);
+                int circleX = colorWidth + (frameCounter * 5) % colorWidth;
+                cv::circle(sbsFrame, cv::Point(circleX, colorHeight/2), 50, cv::Scalar(0, 255, 255), -1);
+                cv::putText(sbsFrame, "DUMMY DEPTH", cv::Point(colorWidth + 50, colorHeight/2 + 50), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(0, 255, 0), 3);
+                
+                frameCounter++;
+                std::this_thread::sleep_for(33ms); // ~30 FPS
+            } else {
+                auto frameset = pipeline->waitForFrameset(100);
+                if (!frameset) continue;
 
-            auto colorFrame = frameset->colorFrame();
-            auto depthFrame = frameset->depthFrame();
+                auto colorFrame = frameset->colorFrame();
+                auto depthFrame = frameset->depthFrame();
 
-            if (colorFrame && depthFrame) {
-                // Transform to visualized frame
-                SbsCompositor::compose(colorFrame, depthFrame, sbsFrame, compConfig);
+                if (colorFrame && depthFrame) {
+                    // Transform to visualized frame
+                    SbsCompositor::compose(colorFrame, depthFrame, sbsFrame, compConfig);
+                } else {
+                    continue;
+                }
+            }
 
+            if (!sbsFrame.empty()) {
                 // Ensure frame is always the expected SBS size for the encoder
                 if (sbsFrame.cols != encoder->getWidth() || sbsFrame.rows != encoder->getHeight()) {
                     cv::Mat canvas = cv::Mat::zeros(encoder->getHeight(), encoder->getWidth(), CV_8UC3);
-                    
-                    // Place it on the left
                     cv::Rect roi(0, 0, std::min(sbsFrame.cols, canvas.cols), std::min(sbsFrame.rows, canvas.rows));
                     sbsFrame(cv::Rect(0, 0, roi.width, roi.height)).copyTo(canvas(roi));
                     sbsFrame = canvas;
@@ -224,10 +285,14 @@ private:
     std::unique_ptr<H264Encoder> encoder;
     rtc::Configuration rtcConfig;
     std::shared_ptr<rtc::PeerConnection> pc;
+    std::shared_ptr<rtc::WebSocket> ws;
     std::shared_ptr<rtc::Track> videoTrack;
     std::shared_ptr<rtc::DataChannel> dc;
     CompositorConfig compConfig;
     bool running = true;
+    bool dummyMode = false;
+    int colorWidth = 640;
+    int colorHeight = 480;
 };
 
 int main() try {
