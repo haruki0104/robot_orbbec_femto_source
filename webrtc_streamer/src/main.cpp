@@ -141,7 +141,7 @@ public:
             }
         });
 
-        ws->onError([](std::string error) {
+        ws->onError([](const std::string &error) {
             std::cerr << "Signaling WebSocket error: " << error << std::endl;
         });
 

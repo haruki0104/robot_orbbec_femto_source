@@ -68,7 +68,7 @@ int main() {
             std::cout << "Client disconnected. Remaining: " << clients.size() << std::endl;
         });
 
-        ws->onError([&, ws](std::string error) {
+        ws->onError([&, ws](const std::string &error) {
             std::cout << "Client error: " << error << std::endl;
             std::lock_guard<std::mutex> lock(clientsMutex);
             clients.erase(ws);
